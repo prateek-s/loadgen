@@ -634,19 +634,23 @@ static void cpu_spin(long long ncpus, long long util_l, long long util_h, void *
     _exit(1);
 }
 
+/* What  we need: Working set size (allocated) ,page dirty rate
+ * What it does: Constant page dirty rate.
+ * TODO: mem allocation in main, and then mem_stir enforces the size, dirty rate.
+ */
 static void mem_stir(long long asz, long long dummy, long long dummy2, void *dummyp, void *dummyp2)
 {
     char *mem_stir_buffer;
     char *p;
     const size_t pagesize = LB_PAGE_SIZE;
     const size_t sz = asz;
-
+    /* 1. Allocate buffer of size */
     say(1, "mem_stir (%d): stirring %llu bytes...\n", getpid(), sz);
     if ((mem_stir_buffer = (char *)malloc(sz)) == NULL) {
         perror("malloc");
         _exit(1);
     }
-
+    /* 2. Write to entire buffer */
     say(2, "mem_stir (%d): dirtying buffer...", getpid());
     for (p = mem_stir_buffer; p < mem_stir_buffer + sz; p++) {
         *p = (char)((uintptr_t)p & 0xff);
@@ -655,9 +659,10 @@ static void mem_stir(long long asz, long long dummy, long long dummy2, void *dum
 
     char *sp = mem_stir_buffer;
     char *dp = mem_stir_buffer;
+    /* Copy page, sleep loop */
     while (1) {
         const size_t copysz = pagesize;
-
+	/* 3. Copy page i to i+5 */
 #ifdef HAVE_MEMMOVE
         memmove(dp, sp, copysz);
 #else
@@ -678,6 +683,9 @@ static void mem_stir(long long asz, long long dummy, long long dummy2, void *dum
     _exit(1);
 }
 
+/*
+ * Disk churn also causes page cache increase? 
+ */
 static void disk_churn(long long dummy0, long long dummy, long long dummy2, void *pathv, void *szv)
 {
     char *path = (char *)pathv;
@@ -767,7 +775,9 @@ static void disk_churn(long long dummy0, long long dummy, long long dummy2, void
     _exit(0);
 }
 
-
+/* Called by start_(mem|disk|cpu)_spinner functions. 
+ *  Fork the main process into one spinner function, which spins and then exits.
+ */
 static pid_t fork_and_call(char *desc, spinner_fn fn, long long arg1, long long arg2, long long arg3, void *argP, void *argP2)
 {
     pid_t p = fork();
@@ -796,6 +806,8 @@ static pid_t fork_and_call(char *desc, spinner_fn fn, long long arg1, long long 
     }
 }
 
+/* Starts CPU spinners on all the cores.
+ */
 static pid_t *start_cpu_spinners(int *ncpus, int util_l, int util_h)
 {
     pid_t *pids;
@@ -859,6 +871,8 @@ static pid_t *start_disk_stirrer(off_t util, char **paths, size_t paths_n)
 
 static pid_t start_mem_whisker(size_t sz)
 {
+
+    /* probably need to allocate mem buffer here? ?? */
     return fork_and_call("mem stirrer", mem_stir, sz, 0, 0, NULL, NULL);
 }
 
@@ -928,7 +942,7 @@ int main(int argc, char **argv)
         { "mem-sleep", 1, NULL, 'M' },
         { 0, 0, 0, 0 }
     };
-
+    /* 1. Read all the command-line parameters */
     while ((c = getopt_long(argc, argv,
                             "n:b:c:d:D:f:m:M:p:P:r:qvVhu",
                             long_options, NULL)) != -1) {
@@ -1072,7 +1086,7 @@ int main(int argc, char **argv)
     signal(SIGCHLD, sigchld_handler);
     signal(SIGTERM, sigterm_handler);
     signal(SIGINT, sigterm_handler);
-
+    /* 2. Fork off all the spinners */
     if (ncpus != 0 && c_cpu_util_h != 0) {
         cpu_pids = start_cpu_spinners(&ncpus, c_cpu_util_l, c_cpu_util_h); // forks
         n_cpu_pids = ncpus;
@@ -1086,8 +1100,10 @@ int main(int argc, char **argv)
     if (c_mem_util != 0) {
         mem_pid = start_mem_whisker(c_mem_util); // forks
     }
-    while (sleep(1) == 0)
+    /* 3. All forked. The main process now sleeps forever. */
+    while (sleep(1) == 0) {	    
             say(2, "lookbusy (%d): waiting for spinners...\n", getpid());
+    }
     shutdown();
     return 0;
 }
