@@ -104,8 +104,6 @@ static const char *copyright =
 #endif
 
 #define PI 3.14159265358979323846
-void* shared_mem_region = NULL ;
-
 enum cpu_util_mode {
     UTIL_MODE_FIXED = 0,
     UTIL_MODE_CURVE
@@ -117,10 +115,13 @@ static int utc = 0;
 static int c_cpu_curve_period = 86400; /* seconds */
 static int c_cpu_curve_peak = 60 * 60 * 13; /* 1PM local time */
 
+/* Load generation values. */
+
 static int c_cpu_util_l = 50, c_cpu_util_h = 50; /* percent */
 static size_t c_mem_util = 0; /* bytes */
 static long c_mem_stir_sleep = 1000; /* 1000 usec / 1 ms */
 static off_t c_disk_util = 0; /* MB */
+
 static char **c_disk_churn_paths;
 static size_t c_disk_churn_paths_n;
 static size_t c_disk_churn_block_size = 32 * 1024; /* bytes */
@@ -138,6 +139,11 @@ static size_t n_cpu_pids;
 static pid_t *disk_pids;
 static size_t n_disk_pids;
 static pid_t mem_pid;
+
+void* shared_mem_region = NULL ;
+
+/* busycount = countspeed*util/100LL*/
+long long global_countspeed ;
 
 typedef void (*spinner_fn)(long long, long long, long long, void*, void *);
 
@@ -425,6 +431,7 @@ static int get_cpu_count()
     return n;
 }
 
+/* Reads /proc/stat */
 static uint64_t get_cpu_busy_time()
 {
     FILE *f;
@@ -483,11 +490,22 @@ static uint64_t get_cpu_busy_time()
 
 static char cpu_spin_accumulator;
 
+/* 1 CPU CYCLE */
 static char squander_time(uint64_t iteration)
 {
     return (cpu_spin_accumulator += (char)iteration);
 }
 
+
+/* TODO */
+int new_resource_value(char* key)
+{
+	return 0;
+}
+
+
+/* busycount=% cpu util, sleeptime=
+ */
 static void cpu_spin_calibrate(int util, uint64_t *busycount, suseconds_t *sleeptime)
 {
     uint64_t counter;
@@ -496,14 +514,17 @@ static void cpu_spin_calibrate(int util, uint64_t *busycount, suseconds_t *sleep
 
     say(1, "cpu_spin (%d): measuring CPU\n", getpid());
     if (gettimeofday(&tv, NULL) == -1) shutdown();
+    /* 1. Do iteration number of cycles */
     for (counter = 0; counter < iterations; counter++) {
         squander_time(counter);
     }
     if (gettimeofday(&tv2, NULL) == -1) shutdown();
     long long elapsed = (tv2.tv_sec - tv.tv_sec) * 1000000 +
                     (tv2.tv_usec - tv.tv_usec);
-    long long countspeed = (counter * 100000)/elapsed;
-    *busycount = (countspeed * util) / 100LL;
+    /* 10^5 is the magic number here? */
+    long long countspeed = (counter * 100000)/elapsed; //time for 1M insns
+    global_countspeed = countspeed ;
+    *busycount = (countspeed * util) / 100LL; //%age
     /* busy_count_time = busycount/(counter/elapsed)
      * idle_time = 1sec - busy_count_time
      */
@@ -516,6 +537,8 @@ static void cpu_spin_calibrate(int util, uint64_t *busycount, suseconds_t *sleep
             getpid(), util, *busycount, *sleeptime);
 }
 
+/* Returns L for fixed case. 
+ */
 static double cpu_spin_compute_util(enum cpu_util_mode mode, int l, int h,
                                     time_t curtime)
 {
@@ -557,6 +580,7 @@ static double cpu_spin_compute_util(enum cpu_util_mode mode, int l, int h,
     return -1;
 }
 
+/* Called by fork_and_call . util_l,h directly from user args */
 static void cpu_spin(long long ncpus, long long util_l, long long util_h, void *dummy, void *dummy2)
 {
     uint64_t busycount;
@@ -566,9 +590,11 @@ static void cpu_spin(long long ncpus, long long util_l, long long util_h, void *
     double util;
     int64_t adjust = 0;
         
-    util = cpu_spin_compute_util(c_cpu_util_mode, util_l, util_h, 0);
+    util = cpu_spin_compute_util(c_cpu_util_mode, util_l, util_h, 0); //util=util_l
 
     cpu_spin_calibrate(util, &busycount, &sleeptime);
+    
+    //say(1,"NEW: %u %u \n",busycount, sleeptime);
 
     say(2, "cpu_spin (%d): spinning cpu\n", getpid());
     while (1) {
@@ -579,7 +605,13 @@ static void cpu_spin(long long ncpus, long long util_l, long long util_h, void *
 
 	int t ;
 	memcpy(&t, shared_mem_region, sizeof(int));
-	say(1,"%d \n", t) ;
+	//say(1,"%d \n", t) ;
+	if(new_resource_value("util")!=util) {
+	     say(1,"Changed CPU util %d-->%d \n", util, new_resource_value("util")) ;
+	     util = new_resource_value("util") ;
+	     busycount = (global_countspeed*util)/100LL ;
+	     sleeptime = 100000 - busycount/(global_countspeed/100000) ;
+	}
 
         if (! first) {
             uint64_t busy = jiffies_to_usec(busytime2 - busytime) / ncpus;
@@ -1121,10 +1153,10 @@ int main(int argc, char **argv)
     /* 3. All forked. The main process now sleeps forever. */
     int timetick = 0 ;
     while (sleep(1) == 0) {
-       say(1, "lookbusy (%d): waiting for spinners...\n", getpid());
        timetick++ ;
        //put this in the shared memory region?
        memcpy(shared_mem_region, &timetick, sizeof(int)) ;
+       say(1, "lookbusy (%d): waiting for spinners...CPU=%d \n", getpid(), c_cpu_util_l);
     }
     shutdown();
     return 0;
