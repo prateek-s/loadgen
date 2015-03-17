@@ -134,6 +134,7 @@ static int ncpus = -1; /* autodetect */
 /* resource vector struct
  */
 struct rv{
+    long int timestamp ;
     int c_cpu_util_l ;
     int c_cpu_util_h ; /* percent */
     size_t c_mem_util ; /* bytes */
@@ -159,6 +160,7 @@ void* shared_mem_region = NULL ;
 /* busycount = countspeed*util/100LL*/
 long long global_countspeed ;
 long int global_trace_start_time ;
+size_t global_max_memory ;
 
 typedef void (*spinner_fn)(long long, long long, long long, void*, void *);
 
@@ -997,16 +999,42 @@ long int get_start_time(FILE* tf)
     return start_time ;
 }
 
-/* What is the format here? */
-int parse_csv_line(char* aline, rv* newrv)
+/* Parse next line and return the timestamp */
+long int parse_csv_line(char* aline, rv* newrv)
 {
     char* line;
     char* token ;
+    long int timestamp = -1 ; 
     line = strdup(aline) ;
-    token = strsep(&line, ",") ;
-    
-    const char* header[] = {"Time","CPU","Memory","Disk"} ;
 
+    
+    
+    const char* header[] = {"Time","CPU","Memory","Disk"} ; 
+    const char* headfmt[]= {"int","float","float","float"} ;
+    int colnum = 0 ;
+    for(colnum; colnum++, token = strsep(&line,",") ; ) {
+      say(2, "%d : %s \n", colnum, token) ;
+      switch(colnum) {
+      case 0 : //Time
+	rv->timestamp = strtol(token, NULL, 10) ;
+	timestamp = rv->timestamp ;
+	break;
+      case 1: //CPU is a fraction in google traces
+	/* ACHTUNG: Some of these use exponential notation! */
+	rv->c_cpu_util_l = ((int) strtod(token, NULL, 10)) * 100 ;
+	//We need a percentage 
+	rv->c_cpu_util_h = rv->c_cpu_util_l ; 
+	break ;
+      case 2: //Memory is a fraction in google traces
+	rv->c_mem_util = (size_t) (global_max_memory * strtod(token, NULL, 10)) ;
+	//memory size is in bytes.
+	break;       
+      }
+      if (token==NULL) {
+	break ;
+      }
+    }
+    return rv->timestamp ;
 }
 
 /* Continue reading the trace file and update the resource vector.
@@ -1121,6 +1149,7 @@ int main(int argc, char **argv)
                     err("Couldn't parse memory utilization size '%s'\n", optarg);
                     return 1;
                 }
+		global_max_memory = c_mem_util ;
                 break;
             case 'M':
                 c_mem_stir_sleep = atol(optarg);
