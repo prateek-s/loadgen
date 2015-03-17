@@ -140,7 +140,7 @@ AUTOCONF = ${SHELL} /home/prateeks/code/lookbusy-1.4/missing --run autoconf
 AUTOHEADER = ${SHELL} /home/prateeks/code/lookbusy-1.4/missing --run autoheader
 AUTOMAKE = ${SHELL} /home/prateeks/code/lookbusy-1.4/missing --run automake-1.11
 AWK = gawk
-CC = cc
+CC = clang
 CCDEPMODE = depmode=gcc3
 CFLAGS = -g -O2 -Wall
 CPP = gcc -E
