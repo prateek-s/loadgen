@@ -1025,7 +1025,7 @@ long int parse_csv_line(char* aline, rv* newrv)
 	//We need a percentage 
 	rv->c_cpu_util_h = rv->c_cpu_util_l ; 
 	break ;
-      case 2: //Memory is a fraction in google traces
+      case 2: //Memory is a fraction in google traces. less than 1
 	rv->c_mem_util = (size_t) (global_max_memory * strtod(token, NULL, 10)) ;
 	//memory size is in bytes.
 	break;       
@@ -1049,6 +1049,7 @@ int update_resource_vector(rv* resvecptr, int timetick, FILE* trace_file)
     char* line ;
     char* token ;
     long int start_time = global_trace_start_time ;
+    long int timestamp ; 
     rv newrv ;
 
  read_a_line:
@@ -1057,7 +1058,15 @@ int update_resource_vector(rv* resvecptr, int timetick, FILE* trace_file)
       say(1, "End of file or file error \n");
       return 1 ;
     }
-    parse_csv_line(aline, &newrv) ; 
+    timestamp =  parse_csv_line(aline, &newrv) ; 
+    timestamp = timestamp - global_trace_start_time ;
+    if(timestamp < timetick) {
+      // We are at time 10. timestamp read is for time 9. parse again
+    }
+    else {
+      //this is the good value!
+      // update the real resource vector now.
+    }
     line = strdup(aline) ;
     say(1, "first line : %s \n", line) ; 
     token = strsep(&line, ",") ;
