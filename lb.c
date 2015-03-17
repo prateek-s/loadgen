@@ -1,3 +1,4 @@
+
 /* $Id: lb.c 795 2013-04-22 05:12:27Z aqua $
  *
  * lookbusy -- a tool for producing synthetic CPU, memory consumption and
@@ -130,6 +131,19 @@ static long c_disk_churn_sleep = 100; /* ms */
 
 static int ncpus = -1; /* autodetect */
 
+/* resource vector struct
+ */
+struct rv{
+    int c_cpu_util_l ;
+    int c_cpu_util_h ; /* percent */
+    size_t c_mem_util ; /* bytes */
+    long c_mem_stir_sleep ; /* 1 ms */
+    off_t c_disk_util ; /* MB */
+    long c_disk_churn_sleep ;
+} ;
+
+typedef struct rv rv ;
+
 static int verbosity = 1;
 
 static char *mem_stir_buffer;
@@ -144,6 +158,7 @@ void* shared_mem_region = NULL ;
 
 /* busycount = countspeed*util/100LL*/
 long long global_countspeed ;
+long int global_trace_start_time ;
 
 typedef void (*spinner_fn)(long long, long long, long long, void*, void *);
 
@@ -954,14 +969,84 @@ static void usage()
     exit(0);
 }
 
-/* Memory region shared between all the processes */
+/* Read the first legit row and return the start time. -1 in case of error
+ */
+long int get_start_time(FILE* tf) 
+{
+    char *aline = NULL ;
+    size_t linecap = 0;
+    ssize_t len ;
+    char* line ;
+    char* token ;
+    long int start_time ;
 
+ read_first_line:
+    len = getline(&aline, &linecap, tf) ;
+    if(len == -1) {
+      say(1, "End of file or file error \n");
+      return -1 ;
+    }
+    line = strdup(aline) ;
+    say(1, "first line : %s \n", line) ; 
+    token = strsep(&line, ",") ;
+    start_time =  strtol(token,NULL,10) ;
+    if(errno && !start_time){
+      err("First line probably a header \n") ;
+      goto read_first_line ;
+    } 
+    return start_time ;
+}
+
+/* What is the format here? */
+int parse_csv_line(char* aline, rv* newrv)
+{
+    char* line;
+    char* token ;
+    line = strdup(aline) ;
+    token = strsep(&line, ",") ;
+    
+    const char* header[] = {"Time","CPU","Memory","Disk"} ;
+
+}
+
+/* Continue reading the trace file and update the resource vector.
+ * We are at timetick seconds. If we missed a timestep, forget about it, we care about second-level granularity only.
+ * If we reach end of file return 1 
+ */
+int update_resource_vector(rv* resvecptr, int timetick, FILE* trace_file) 
+{
+    char *aline = NULL ;
+    size_t linecap = 0;
+    ssize_t len ;
+    char* line ;
+    char* token ;
+    long int start_time = global_trace_start_time ;
+    rv newrv ;
+
+ read_a_line:
+    len = getline(&aline, &linecap, trace_file) ;
+    if(len == -1) {
+      say(1, "End of file or file error \n");
+      return 1 ;
+    }
+    parse_csv_line(aline, &newrv) ; 
+    line = strdup(aline) ;
+    say(1, "first line : %s \n", line) ; 
+    token = strsep(&line, ",") ;
+    start_time =  strtol(token,NULL,10) ;
+    if(errno && !start_time){
+      err("First line probably a header \n") ;
+    }
+
+}
 
 int main(int argc, char **argv)
 {
     int c;
     size_t disk_paths_cap = 0;
-
+    char* trace_file_name ;
+    FILE* trace_file ;
+    rv resource_vector ;
     static const struct option long_options[] = {
         { "help", 0, NULL, 'h' },
         { "verbose", 0, NULL, 'v' },
@@ -979,14 +1064,14 @@ int main(int argc, char **argv)
         { "disk-sleep", 1, NULL, 'D' },
         { "disk-block-size", 1, NULL, 'b' },
         { "disk-path", 1, NULL, 'f' },
-
+        { "trace-file", 1, NULL, 't' },
         { "mem-util", 1, NULL, 'm' },
         { "mem-sleep", 1, NULL, 'M' },
         { 0, 0, 0, 0 }
     };
     /* 1. Read all the command-line parameters */
     while ((c = getopt_long(argc, argv,
-                            "n:b:c:d:D:f:m:M:p:P:r:qvVhu",
+                            "n:b:c:d:D:f:m:M:p:P:r:t:qvVhu",
                             long_options, NULL)) != -1) {
         switch (c) {
             default:
@@ -1061,6 +1146,14 @@ int main(int argc, char **argv)
                     return 1;
                 }
                 break;
+	    case 't':
+	      //Read trace file
+	      trace_file_name = optarg ;
+	      trace_file = fopen(trace_file_name, "r") ;
+	      if(trace_file==NULL) {
+		err("Cant open trace file! %s\n",trace_file_name);
+	      }
+	      break ;
             case 'q':
                 verbosity = 0;
                 break;
@@ -1130,8 +1223,8 @@ int main(int argc, char **argv)
     signal(SIGINT, sigterm_handler);
 
     /* TODO: Setup the MAP_SHARED anon memory region here */
-
-    shared_mem_region = mmap(NULL, 2*sizeof(int), PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS,-1,0);
+    /* MAP_ANONYMOUS is Linux specific */
+    shared_mem_region = mmap(NULL, 2*sizeof(int), PROT_READ|PROT_WRITE, MAP_SHARED/*|MAP_ANONYMOUS*/,-1,0);
     say(1, "%p \n", shared_mem_region) ;
     if(shared_mem_region == NULL) {
 	    say(1, "mmap error");
@@ -1152,9 +1245,17 @@ int main(int argc, char **argv)
     }
     /* 3. All forked. The main process now sleeps forever. */
     int timetick = 0 ;
+    /* 4. Start the clock */
+    long int start_time = get_start_time(trace_file) ;
+    global_trace_start_time =  start_time ; 
     while (sleep(1) == 0) {
        timetick++ ;
        //put this in the shared memory region?
+       /* 5. Read next value */
+       if(update_resource_vector(&resource_vector, timetick, trace_file)) {
+	 //End of file probably reached
+	 say(1,"End of file probably reached \n \n");
+       }
        memcpy(shared_mem_region, &timetick, sizeof(int)) ;
        say(1, "lookbusy (%d): waiting for spinners...CPU=%d \n", getpid(), c_cpu_util_l);
     }
