@@ -79,6 +79,8 @@ static const char *copyright =
 #include <stdarg.h>
 #include <math.h>
 
+#include <sys/mman.h>
+
 #ifndef HAVE_STRTOL
 #define strtol(x,e,b) atol(x)
 #endif
@@ -102,6 +104,7 @@ static const char *copyright =
 #endif
 
 #define PI 3.14159265358979323846
+void* shared_mem_region = NULL ;
 
 enum cpu_util_mode {
     UTIL_MODE_FIXED = 0,
@@ -574,6 +577,10 @@ static void cpu_spin(long long ncpus, long long util_l, long long util_h, void *
         uint64_t busytime, busytime2;
         uint64_t walltime, walltime2;
 
+	int t ;
+	memcpy(&t, shared_mem_region, sizeof(int));
+	say(1,"%d \n", t) ;
+
         if (! first) {
             uint64_t busy = jiffies_to_usec(busytime2 - busytime) / ncpus;
             uint64_t wall = walltime2 - walltime;
@@ -915,6 +922,9 @@ static void usage()
     exit(0);
 }
 
+/* Memory region shared between all the processes */
+
+
 int main(int argc, char **argv)
 {
     int c;
@@ -1086,6 +1096,14 @@ int main(int argc, char **argv)
     signal(SIGCHLD, sigchld_handler);
     signal(SIGTERM, sigterm_handler);
     signal(SIGINT, sigterm_handler);
+
+    /* TODO: Setup the MAP_SHARED anon memory region here */
+
+    shared_mem_region = mmap(NULL, 2*sizeof(int), PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS,-1,0);
+    say(1, "%p \n", shared_mem_region) ;
+    if(shared_mem_region == NULL) {
+	    say(1, "mmap error");
+    }
     /* 2. Fork off all the spinners */
     if (ncpus != 0 && c_cpu_util_h != 0) {
         cpu_pids = start_cpu_spinners(&ncpus, c_cpu_util_l, c_cpu_util_h); // forks
@@ -1101,8 +1119,12 @@ int main(int argc, char **argv)
         mem_pid = start_mem_whisker(c_mem_util); // forks
     }
     /* 3. All forked. The main process now sleeps forever. */
-    while (sleep(1) == 0) {	    
-            say(2, "lookbusy (%d): waiting for spinners...\n", getpid());
+    int timetick = 0 ;
+    while (sleep(1) == 0) {
+       say(1, "lookbusy (%d): waiting for spinners...\n", getpid());
+       timetick++ ;
+       //put this in the shared memory region?
+       memcpy(shared_mem_region, &timetick, sizeof(int)) ;
     }
     shutdown();
     return 0;
