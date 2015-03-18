@@ -1264,7 +1264,12 @@ int main(int argc, char **argv)
 
     /* TODO: Setup the MAP_SHARED anon memory region here */
     /* MAP_ANONYMOUS is Linux specific */
+#ifdef __linux__
     shared_mem_region = mmap(NULL, 2*sizeof(int), PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS,-1,0);
+#else
+    shared_mem_region = mmap(NULL, 2*sizeof(int), PROT_READ|PROT_WRITE, MAP_SHARED, -1, 0);
+#endif
+
     say(1, "%x \n", shared_mem_region) ;
     if(shared_mem_region == NULL) {
 	    say(1, "mmap error");
