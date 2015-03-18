@@ -728,21 +728,27 @@ int calibrate_page_dirty()
 }
 
 /* Return time to sleep(us) for a target dirty rate */
-int update_memory_rv(void* shared_mem_region, size_t* sz, int* target_dirty_rate, int max_dirty_rate)
+long update_memory_rv(void* shared_mem_region, size_t* sz, int max_dirty_rate)
 {
   rv* newrv = malloc(sizeof(rv)) ;
   memcpy(newrv, shared_mem_region, sizeof(rv)) ;
-  size_t newsize;
-  //sz = newrv->size ;
+  size_t newsize = newrv->c_mem_util ;
+
   sz = &newsize ;
-  int new_dirty ;
-  //sz = newrv->dirty_rate 
-  int sleep_duration = 1000 ;
-  
+
+  const int usins = 1000000 ; //1 Million, please.
+  long sleep_duration = 1000 ;
+  int M = max_dirty_rate ;
+  int D ; //newrv->dirty_rate 
   /* can write M pages in 1 us. For D, be busy for D/M fraction of time,
    * sleep for 10^6(1-(D/M))
    */
-  
+  if (D > M) {
+    //not supposed to happen?
+    D = M ;
+  }
+  sleep_duration = usins - ((usins*D)/M) ;
+
   return sleep_duration ;
 }
 
@@ -754,9 +760,13 @@ static void mem_stir(long long asz, long long dummy, long long dummy2, void *dum
 {
     char *mem_stir_buffer;
     char *p;
-    long mem_sleep_duration; //derive page dirty rate from this? 
+    long mem_sleep_duration = 500000 ; //derive page dirty rate from this? 
     const size_t pagesize = LB_PAGE_SIZE;
-    size_t sz = asz;
+    /* For the first time, we haven't read the CSV file and operate with the global max memory.
+     * No need to allocate it all and then shrink it drastically. Lets just allocate about 1/8 of it?
+     * I am worried about OOM due to realloc copying older buffer to shrink it. 
+     */
+    size_t sz = asz/8;
     size_t newsz ;
     /* 1. Allocate buffer of size */
     say(1, "mem_stir (%d): stirring %llu bytes...\n", getpid(), sz);
@@ -782,8 +792,13 @@ static void mem_stir(long long asz, long long dummy, long long dummy2, void *dum
     while (1) {
         const size_t copysz = pagesize;
 	//update size, dirty rate here.
-	update_memory_rv(shared_mem_region, &newsz, &target_dirty_rate, max_dirty_rate);
-
+	mem_sleep_duration = update_memory_rv(shared_mem_region, &newsz, max_dirty_rate);
+	//realloc ? 
+	mem_stir_buffer = realloc(mem_stir_buffer, newsz) ;
+	if(!mem_stir_buffer) {
+	  err("REALLOC FAILED, FATAL error \n") ;
+	  shutdown() ;
+	}
 	/* 3. Copy page i to i+5 */
 #ifdef HAVE_MEMMOVE
         memmove(dp, sp, copysz);
@@ -800,7 +815,7 @@ static void mem_stir(long long asz, long long dummy, long long dummy2, void *dum
             say(2, "mem_stir (%d): write position wrapped\n", getpid());
             dp = mem_stir_buffer;
         }
-        usleep(c_mem_stir_sleep);
+        usleep(mem_sleep_duration);
     }
     _exit(1);
 }
