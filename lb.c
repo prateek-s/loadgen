@@ -1020,53 +1020,21 @@ long int parse_csv_line(char* aline, rv* newrv)
     line = strdup(aline) ;
 
     const char* header[] = {"Time","CPU","Memory","Disk"} ; 
-    const char* headfmt[]= {"int","float","float","float"} ;
+    const char* headfmt[]= {"int","double","double","float"} ;
     int colnum = 0 ;
     int max_fields = 4 ;
     int first = 1 ;
     double cpu,mem ;
     sscanf(line, "%d %lf %lf", &timestamp, &cpu, &mem) ;
+
     say(1,"sscanf %d %f %f\n",timestamp, cpu, mem) ;
     newrv->timestamp = timestamp ;
     newrv->c_cpu_util_l = (int)(cpu * 100) ;
     newrv->c_cpu_util_h = newrv->c_cpu_util_l ;
     newrv->c_mem_util =  (size_t) (global_max_memory * mem) ; //mem is a fraction
+
     return timestamp ;
 
-    for(colnum = 0; colnum < max_fields ; colnum++) {
-      if(first==1) {
-	token = strsep(&line," ");
-	first = 0;
-      }
-      else {
-	token = strsep(NULL," ");
-      }
-      say(1, "TK %d : %s \n", colnum, token) ;
-      if (token==NULL) {
-	break ;
-      }
-      switch(colnum) {
-      case 0: //Time
-	newrv->timestamp = strtol(token, NULL, 10) ;
-	say(1,"time %d\n",newrv->timestamp) ;
-	timestamp = newrv->timestamp ;
-	break;
-      case 1: //CPU is a fraction in google traces
-	/* ACHTUNG: Some of these use exponential notation! */
-	newrv->c_cpu_util_l = ((int) strtod(token, NULL)) * 100 ;
-	//We need a percentage 
-	newrv->c_cpu_util_h = newrv->c_cpu_util_l ; 
-	break ;
-      case 2: //Memory is a fraction in google traces. less than 1
-	newrv->c_mem_util = (size_t) (global_max_memory * strtod(token, NULL)) ;
-	//memory size is in bytes.
-	break;       
-      default:
-	break ;
-      }
-    }
-    say(1,"PARSED: %d %d %d \n",newrv->timestamp, newrv->c_cpu_util_l, newrv->c_mem_util);
-    return newrv->timestamp ;
 }
 
 /* Continue reading the trace file and update the resource vector.
