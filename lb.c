@@ -542,6 +542,7 @@ static void cpu_spin_calibrate(int util, uint64_t *busycount, suseconds_t *sleep
     say(1,"elapsed time=%lld, ctr=%lld \n",elapsed, counter) ;
     long long countspeed = (counter * 100000)/elapsed; //time for 1M insns
     global_countspeed = countspeed ;
+
     *busycount = (countspeed * util) / 100LL; //%age
     /* busy_count_time = busycount/(counter/elapsed)
      * idle_time = 1sec - busy_count_time
@@ -618,12 +619,13 @@ static void cpu_spin(long long ncpus, long long util_l, long long util_h, void *
     while (1) {
         struct timeval tv;
         long long counter;
-        uint64_t busytime=100000, busytime2=100000;
-        uint64_t walltime=1, walltime2=1 ;	/* TODO: busytime2 may have to be initialized acc to clang */
+        uint64_t busytime, busytime2;
+        uint64_t walltime, walltime2 ;	/* TODO: busytime2 may have to be initialized acc to clang */
+
 	int t ;
 	memcpy(&t, shared_mem_region, sizeof(int));
 	//say(1,"%d \n", t) ;
-	if(0 && new_resource_value("util") != util) {
+	if(0 && (new_resource_value("util") != util)) {
 	     say(1,"Changed CPU util %d-->%d \n", util, new_resource_value("util")) ;
 	     util = new_resource_value("util") ;
 	     busycount = (global_countspeed*util)/100LL ;
@@ -967,7 +969,7 @@ static void usage()
 "                       Time to sleep between iterations, in msec (default 100)\n"
 "  -f, --disk-path=PATH Path to a file/directory to use as a buffer (default\n"
 "                         /tmp); specify multiple times for additional paths\n"
-"";
+"-t, trace file name";
     printf("usage: %s", msg);
     exit(0);
 }
@@ -982,7 +984,9 @@ long int get_start_time(FILE* tf)
     char* line ;
     char* token ;
     long int start_time ;
-
+    if(tf == NULL) {
+      return -1 ;
+    }
  read_first_line:
     len = getline(&aline, &linecap, tf) ;
     if(len == -1) {
@@ -1278,13 +1282,14 @@ int main(int argc, char **argv)
     /* 3. All forked. The main process now sleeps forever. */
     int timetick = 0 ;
     /* 4. Start the clock */
-    long int start_time = get_start_time(trace_file) ;
-    global_trace_start_time =  start_time ; 
+    /* long int start_time = get_start_time(trace_file) ; */
+    /* global_trace_start_time =  start_time ;  */
+
     while (sleep(1) == 0) {
        timetick++ ;
        //put this in the shared memory region?
        /* 5. Read next value */
-       if(update_resource_vector(resource_vector, timetick, trace_file)) {
+       if(0 && update_resource_vector(resource_vector, timetick, trace_file)) {
 	 //End of file probably reached
 	 say(1,"End of file probably reached \n \n");
        }
