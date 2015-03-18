@@ -969,7 +969,7 @@ static void usage()
 "                       Time to sleep between iterations, in msec (default 100)\n"
 "  -f, --disk-path=PATH Path to a file/directory to use as a buffer (default\n"
 "                         /tmp); specify multiple times for additional paths\n"
-"-t, trace file name";
+"-t, trace file name \n";
     printf("usage: %s", msg);
     exit(0);
 }
@@ -988,6 +988,11 @@ long int get_start_time(FILE* tf)
       return -1 ;
     }
  read_first_line:
+
+    aline = NULL ;
+    linecap = 0 ;
+    say(1,"aline=%p",&aline) ;
+    
     len = getline(&aline, &linecap, tf) ;
     if(len == -1) {
       say(1, "End of file or file error \n");
@@ -995,12 +1000,14 @@ long int get_start_time(FILE* tf)
     }
     line = strdup(aline) ;
     say(1, "first line : %s \n", line) ; 
-    token = strsep(&line, ",") ;
+    token = strsep(&line, " ") ;
     start_time =  strtol(token,NULL,10) ;
     if(errno && !start_time){
       err("First line probably a header \n") ;
       goto read_first_line ;
     } 
+    say(1,"START TIME:%d, FP=%d \n",start_time, ftell(tf)) ;
+    
     return start_time ;
 }
 
@@ -1016,16 +1023,23 @@ long int parse_csv_line(char* aline, rv* newrv)
     const char* headfmt[]= {"int","float","float","float"} ;
     int colnum = 0 ;
     int max_fields = 4 ;
-    for(colnum; \ 
-	  token!=NULL, colnum<max_fields ; \
-	colnum++, token = strsep(&line,",")) {
-      say(2, "%d : %s \n", colnum, token) ;
+    int first = 1 ;
+    for(colnum = 0; colnum < max_fields ; colnum++) {
+      if(first) {
+	token = strsep(&line," ");
+	first = 0;
+      }
+      else {
+	token = strsep(NULL," ");
+      }
+      say(1, "TK %d : %s \n", colnum, token) ;
       if (token==NULL) {
 	break ;
       }
       switch(colnum) {
-      case 0 : //Time
+      case 0: //Time
 	newrv->timestamp = strtol(token, NULL, 10) ;
+	say(1,"time %d\n",token) ;
 	timestamp = newrv->timestamp ;
 	break;
       case 1: //CPU is a fraction in google traces
@@ -1038,8 +1052,11 @@ long int parse_csv_line(char* aline, rv* newrv)
 	newrv->c_mem_util = (size_t) (global_max_memory * strtod(token, NULL)) ;
 	//memory size is in bytes.
 	break;       
+      default:
+	break ;
       }
     }
+    say(1,"PARSED: %d %d %d \n",newrv->timestamp, newrv->c_cpu_util_l, newrv->c_mem_util);
     return newrv->timestamp ;
 }
 
@@ -1049,28 +1066,36 @@ long int parse_csv_line(char* aline, rv* newrv)
  */
 int update_resource_vector(rv* resource_vector, int timetick, FILE* trace_file) 
 {
-    char *aline = NULL ;
-    size_t linecap = 0;
+    char *aline ;
+    size_t linecap ;
     ssize_t len ;
     char* line ;
     char* token ;
     long int start_time = global_trace_start_time ;
     long int trace_time ; 
-
+    say(1,"FP is %d\n",ftell(trace_file)) ;
+ parse_a_line:
+    aline = NULL ;
+    linecap = 0 ;
+    
     len = getline(&aline, &linecap, trace_file) ;
+    line = strdup(aline) ;
     if(len == -1) {
-        say(1, "End of file or file error \n");
+        say(1, "End of file or file error %d\n",errno);
 	return 1 ;
     }
-    trace_time =  parse_csv_line(aline, resource_vector) - start_time; 
+    trace_time =  parse_csv_line(line, resource_vector) - start_time; 
     /* Timetick is actual timer elapsed (in seconds)
      */
+    say(1,"actual trace time is %d\n", trace_time) ;
     if(trace_time < timetick) {
       // We are at time 10. timestamp read is for time 9. parse again
+      //goto parse_a_line ;
     }
     else {
       //this is the good value!
       // update the real resource vector now.
+      say(1,"RES VECTOR FOUND![%d] : %s \n",trace_time, line) ;
     }
     return 0 ;
 }
@@ -1082,6 +1107,8 @@ int main(int argc, char **argv)
     char* trace_file_name ;
     FILE* trace_file = NULL;
     rv* resource_vector = malloc(sizeof(rv)) ;
+    rv* new_resource_vector = malloc(sizeof(rv)) ;
+
     static const struct option long_options[] = {
         { "help", 0, NULL, 'h' },
         { "verbose", 0, NULL, 'v' },
@@ -1282,14 +1309,16 @@ int main(int argc, char **argv)
     /* 3. All forked. The main process now sleeps forever. */
     int timetick = 0 ;
     /* 4. Start the clock */
-    /* long int start_time = get_start_time(trace_file) ; */
-    /* global_trace_start_time =  start_time ;  */
-
+    if(trace_file) {
+      long int start_time = get_start_time(trace_file) ;    
+      global_trace_start_time =  start_time ;
+    }
+    //construct the resource_vector here.
     while (sleep(1) == 0) {
        timetick++ ;
        //put this in the shared memory region?
        /* 5. Read next value */
-       if(0 && update_resource_vector(resource_vector, timetick, trace_file)) {
+       if(trace_file && update_resource_vector(new_resource_vector, timetick, trace_file)) {
 	 //End of file probably reached
 	 say(1,"End of file probably reached \n \n");
        }
