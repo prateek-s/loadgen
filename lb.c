@@ -539,6 +539,7 @@ static void cpu_spin_calibrate(int util, uint64_t *busycount, suseconds_t *sleep
     long long elapsed = (tv2.tv_sec - tv.tv_sec) * 1000000 +
                     (tv2.tv_usec - tv.tv_usec);
     /* 10^5 is the magic number here? */
+    say(1,"elapsed time=%lld, ctr=%lld \n",elapsed, counter) ;
     long long countspeed = (counter * 100000)/elapsed; //time for 1M insns
     global_countspeed = countspeed ;
     *busycount = (countspeed * util) / 100LL; //%age
@@ -617,13 +618,12 @@ static void cpu_spin(long long ncpus, long long util_l, long long util_h, void *
     while (1) {
         struct timeval tv;
         long long counter;
-        uint64_t busytime, busytime2;
-        uint64_t walltime, walltime2;
-
+        uint64_t busytime=100000, busytime2=100000;
+        uint64_t walltime=1, walltime2=1 ;	/* TODO: busytime2 may have to be initialized acc to clang */
 	int t ;
 	memcpy(&t, shared_mem_region, sizeof(int));
 	//say(1,"%d \n", t) ;
-	if(new_resource_value("util")!=util) {
+	if(0 && new_resource_value("util") != util) {
 	     say(1,"Changed CPU util %d-->%d \n", util, new_resource_value("util")) ;
 	     util = new_resource_value("util") ;
 	     busycount = (global_countspeed*util)/100LL ;
@@ -907,6 +907,7 @@ static pid_t *start_disk_stirrer(off_t util, char **paths, size_t paths_n)
                     perror("mkstemp");
                     free(tmpl);
                     shutdown();
+		    return 12 ;
                 }
 
                 free(paths[i]);
@@ -1002,46 +1003,47 @@ long int get_start_time(FILE* tf)
 /* Parse next line and return the timestamp */
 long int parse_csv_line(char* aline, rv* newrv)
 {
-    char* line;
-    char* token ;
+    char* line = NULL ;
+    char* token =NULL ;
     long int timestamp = -1 ; 
     line = strdup(aline) ;
 
-    
-    
     const char* header[] = {"Time","CPU","Memory","Disk"} ; 
     const char* headfmt[]= {"int","float","float","float"} ;
     int colnum = 0 ;
-    for(colnum; colnum++, token = strsep(&line,",") ; ) {
+    int max_fields = 4 ;
+    for(colnum; \ 
+	  token!=NULL, colnum<max_fields ; \
+	colnum++, token = strsep(&line,",")) {
       say(2, "%d : %s \n", colnum, token) ;
-      switch(colnum) {
-      case 0 : //Time
-	rv->timestamp = strtol(token, NULL, 10) ;
-	timestamp = rv->timestamp ;
-	break;
-      case 1: //CPU is a fraction in google traces
-	/* ACHTUNG: Some of these use exponential notation! */
-	rv->c_cpu_util_l = ((int) strtod(token, NULL, 10)) * 100 ;
-	//We need a percentage 
-	rv->c_cpu_util_h = rv->c_cpu_util_l ; 
-	break ;
-      case 2: //Memory is a fraction in google traces. less than 1
-	rv->c_mem_util = (size_t) (global_max_memory * strtod(token, NULL, 10)) ;
-	//memory size is in bytes.
-	break;       
-      }
       if (token==NULL) {
 	break ;
       }
+      switch(colnum) {
+      case 0 : //Time
+	newrv->timestamp = strtol(token, NULL, 10) ;
+	timestamp = newrv->timestamp ;
+	break;
+      case 1: //CPU is a fraction in google traces
+	/* ACHTUNG: Some of these use exponential notation! */
+	newrv->c_cpu_util_l = ((int) strtod(token, NULL)) * 100 ;
+	//We need a percentage 
+	newrv->c_cpu_util_h = newrv->c_cpu_util_l ; 
+	break ;
+      case 2: //Memory is a fraction in google traces. less than 1
+	newrv->c_mem_util = (size_t) (global_max_memory * strtod(token, NULL)) ;
+	//memory size is in bytes.
+	break;       
+      }
     }
-    return rv->timestamp ;
+    return newrv->timestamp ;
 }
 
 /* Continue reading the trace file and update the resource vector.
  * We are at timetick seconds. If we missed a timestep, forget about it, we care about second-level granularity only.
  * If we reach end of file return 1 
  */
-int update_resource_vector(rv* resvecptr, int timetick, FILE* trace_file) 
+int update_resource_vector(rv* resource_vector, int timetick, FILE* trace_file) 
 {
     char *aline = NULL ;
     size_t linecap = 0;
@@ -1049,32 +1051,24 @@ int update_resource_vector(rv* resvecptr, int timetick, FILE* trace_file)
     char* line ;
     char* token ;
     long int start_time = global_trace_start_time ;
-    long int timestamp ; 
-    rv newrv ;
+    long int trace_time ; 
 
- read_a_line:
     len = getline(&aline, &linecap, trace_file) ;
     if(len == -1) {
-      say(1, "End of file or file error \n");
-      return 1 ;
+        say(1, "End of file or file error \n");
+	return 1 ;
     }
-    timestamp =  parse_csv_line(aline, &newrv) ; 
-    timestamp = timestamp - global_trace_start_time ;
-    if(timestamp < timetick) {
+    trace_time =  parse_csv_line(aline, resource_vector) - start_time; 
+    /* Timetick is actual timer elapsed (in seconds)
+     */
+    if(trace_time < timetick) {
       // We are at time 10. timestamp read is for time 9. parse again
     }
     else {
       //this is the good value!
       // update the real resource vector now.
     }
-    line = strdup(aline) ;
-    say(1, "first line : %s \n", line) ; 
-    token = strsep(&line, ",") ;
-    start_time =  strtol(token,NULL,10) ;
-    if(errno && !start_time){
-      err("First line probably a header \n") ;
-    }
-
+    return 0 ;
 }
 
 int main(int argc, char **argv)
@@ -1082,8 +1076,8 @@ int main(int argc, char **argv)
     int c;
     size_t disk_paths_cap = 0;
     char* trace_file_name ;
-    FILE* trace_file ;
-    rv resource_vector ;
+    FILE* trace_file = NULL;
+    rv* resource_vector = malloc(sizeof(rv)) ;
     static const struct option long_options[] = {
         { "help", 0, NULL, 'h' },
         { "verbose", 0, NULL, 'v' },
@@ -1290,7 +1284,7 @@ int main(int argc, char **argv)
        timetick++ ;
        //put this in the shared memory region?
        /* 5. Read next value */
-       if(update_resource_vector(&resource_vector, timetick, trace_file)) {
+       if(update_resource_vector(resource_vector, timetick, trace_file)) {
 	 //End of file probably reached
 	 say(1,"End of file probably reached \n \n");
        }
