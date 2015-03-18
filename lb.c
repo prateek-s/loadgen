@@ -1299,5 +1299,5 @@ int main(int argc, char **argv)
     shutdown();
     return 0;
 }
-
+/* None for emacs? */
 /* vi: set ts=4 sw=4 et: */
