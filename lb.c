@@ -1024,8 +1024,17 @@ long int parse_csv_line(char* aline, rv* newrv)
     int colnum = 0 ;
     int max_fields = 4 ;
     int first = 1 ;
+    double cpu,mem ;
+    sscanf(line, "%d %lf %lf", &timestamp, &cpu, &mem) ;
+    say(1,"sscanf %d %f %f\n",timestamp, cpu, mem) ;
+    newrv->timestamp = timestamp ;
+    newrv->c_cpu_util_l = (int)(cpu * 100) ;
+    newrv->c_cpu_util_h = newrv->c_cpu_util_l ;
+    newrv->c_mem_util =  (size_t) (global_max_memory * mem) ; //mem is a fraction
+    return timestamp ;
+
     for(colnum = 0; colnum < max_fields ; colnum++) {
-      if(first) {
+      if(first==1) {
 	token = strsep(&line," ");
 	first = 0;
       }
@@ -1039,7 +1048,7 @@ long int parse_csv_line(char* aline, rv* newrv)
       switch(colnum) {
       case 0: //Time
 	newrv->timestamp = strtol(token, NULL, 10) ;
-	say(1,"time %d\n",token) ;
+	say(1,"time %d\n",newrv->timestamp) ;
 	timestamp = newrv->timestamp ;
 	break;
       case 1: //CPU is a fraction in google traces
