@@ -758,7 +758,7 @@ long update_memory_rv(void* shared_mem_region, size_t* sz, int max_dirty_rate)
  */
 static void mem_stir(long long asz, long long dummy, long long dummy2, void *dummyp, void *dummyp2)
 {
-    char *mem_stir_buffer;
+    char *mem_stir_buffer; /* The malloced playground buffer */
     char *p;
     long mem_sleep_duration = 500000 ; //derive page dirty rate from this? 
     const size_t pagesize = LB_PAGE_SIZE;
@@ -784,7 +784,6 @@ static void mem_stir(long long asz, long long dummy, long long dummy2, void *dum
     for (p = mem_stir_buffer; p < mem_stir_buffer + sz; p++) {
         *p = (char)((uintptr_t)p & 0xff);
     }
-    say(2, "done\n");
 
     char *sp = mem_stir_buffer;
     char *dp = mem_stir_buffer;
@@ -1361,7 +1360,7 @@ int main(int argc, char **argv)
         disk_pids = start_disk_stirrer(c_disk_util,
                                        c_disk_churn_paths,
                                        c_disk_churn_paths_n); // forks
-        n_disk_pids = c_disk_churn_paths_n;
+        n_disk_pids = c_disk_churn_paths_n ;
     }
     if (c_mem_util != 0) {
         mem_pid = start_mem_whisker(c_mem_util); // forks
