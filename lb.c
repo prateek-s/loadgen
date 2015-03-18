@@ -692,22 +692,83 @@ static void cpu_spin(long long ncpus, long long util_l, long long util_h, void *
     _exit(1);
 }
 
+
+/* Find out what is the maximum rate of page dirty rate supported?
+ */
+int calibrate_page_dirty()
+{
+  int dirty_rate = 1 ;
+  /* need to worry about CPU cache sizes here. 4MB too small?
+   * Atleast 16 MB ?
+   */
+  const int numpages = 1024 ;
+  const int bufsize = LB_PAGE_SIZE*numpages ;
+  char* mem_buf = malloc(bufsize) ;
+  if(!mem_buf) {
+    err("Cant allocate buffer to calibrate page dirty \n") ;
+    shutdown() ;
+  }
+  struct timeval tv,tv2 ;
+  if (gettimeofday(&tv, NULL) == -1) shutdown();
+  int i,j ;
+  for (i=0; i < 10; i++) {
+    /* 10 iterations enough? */
+    for(j=0; j < bufsize-1 /*paranoid */; j++) {
+      mem_buf[j]='a' ; 
+    }
+  }
+  if (gettimeofday(&tv2, NULL) == -1) shutdown();
+  long long elapsed = (tv2.tv_sec - tv.tv_sec) * 1000000 +
+                    (tv2.tv_usec - tv.tv_usec);
+  //num pages written / time 
+  dirty_rate = (bufsize*10)/elapsed ;
+  free(mem_buf) ;
+  return dirty_rate;
+
+}
+
+/* Return time to sleep(us) for a target dirty rate */
+int update_memory_rv(void* shared_mem_region, size_t* sz, int* target_dirty_rate, int max_dirty_rate)
+{
+  rv* newrv = malloc(sizeof(rv)) ;
+  memcpy(newrv, shared_mem_region, sizeof(rv)) ;
+  size_t newsize;
+  //sz = newrv->size ;
+  sz = &newsize ;
+  int new_dirty ;
+  //sz = newrv->dirty_rate 
+  int sleep_duration = 1000 ;
+  
+  /* can write M pages in 1 us. For D, be busy for D/M fraction of time,
+   * sleep for 10^6(1-(D/M))
+   */
+  
+  return sleep_duration ;
+}
+
 /* What  we need: Working set size (allocated) ,page dirty rate
- * What it does: Constant page dirty rate.
+ * What it does: Constant page dirty rate on a memory of size asz.
  * TODO: mem allocation in main, and then mem_stir enforces the size, dirty rate.
  */
 static void mem_stir(long long asz, long long dummy, long long dummy2, void *dummyp, void *dummyp2)
 {
     char *mem_stir_buffer;
     char *p;
+    long mem_sleep_duration; //derive page dirty rate from this? 
     const size_t pagesize = LB_PAGE_SIZE;
-    const size_t sz = asz;
+    size_t sz = asz;
+    size_t newsz ;
     /* 1. Allocate buffer of size */
     say(1, "mem_stir (%d): stirring %llu bytes...\n", getpid(), sz);
     if ((mem_stir_buffer = (char *)malloc(sz)) == NULL) {
         perror("malloc");
         _exit(1);
     }
+
+    int max_dirty_rate = calibrate_page_dirty() ;
+    int target_dirty_rate ;
+    say(1, "Max page dirty rate found is %d \n", max_dirty_rate) ;
+
     /* 2. Write to entire buffer */
     say(2, "mem_stir (%d): dirtying buffer...", getpid());
     for (p = mem_stir_buffer; p < mem_stir_buffer + sz; p++) {
@@ -720,6 +781,9 @@ static void mem_stir(long long asz, long long dummy, long long dummy2, void *dum
     /* Copy page, sleep loop */
     while (1) {
         const size_t copysz = pagesize;
+	//update size, dirty rate here.
+	update_memory_rv(shared_mem_region, &newsz, &target_dirty_rate, max_dirty_rate);
+
 	/* 3. Copy page i to i+5 */
 #ifdef HAVE_MEMMOVE
         memmove(dp, sp, copysz);
