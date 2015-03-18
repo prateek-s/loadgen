@@ -140,9 +140,9 @@ AUTOCONF = ${SHELL} /home/p/code/loadgen/missing --run autoconf
 AUTOHEADER = ${SHELL} /home/p/code/loadgen/missing --run autoheader
 AUTOMAKE = ${SHELL} /home/p/code/loadgen/missing --run automake-1.11
 AWK = gawk
-CC = clang
+CC = gcc
 CCDEPMODE = depmode=gcc3
-CFLAGS = -g -Wall -Wextra 
+CFLAGS = -g -O2
 CPP = gcc -E
 CPPFLAGS = 
 CYGPATH_W = echo
