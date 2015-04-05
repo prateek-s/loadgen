@@ -118,18 +118,26 @@ static int c_cpu_curve_peak = 60 * 60 * 13; /* 1PM local time */
 
 /* Load generation values. */
 
-static int c_cpu_util_l = 50, c_cpu_util_h = 50; /* percent */
-static size_t c_mem_util = 0; /* bytes */
-static long c_mem_stir_sleep = 1000; /* 1000 usec / 1 ms */
-static off_t c_disk_util = 0; /* MB */
+ /* percent */
+static int c_cpu_util_l = 50, c_cpu_util_h = 50;
+/* bytes */
+static size_t c_mem_util = 0; 
+/* Page dirty rate. 0 sleep=MAX. in us*/
+static long c_mem_stir_sleep = 1000; 
+/* MB */
+static off_t c_disk_util = 0;
 
 static char **c_disk_churn_paths;
 static size_t c_disk_churn_paths_n;
-static size_t c_disk_churn_block_size = 32 * 1024; /* bytes */
-static size_t c_disk_churn_step_size = 4 * 1024; /* bytes */
-static long c_disk_churn_sleep = 100; /* ms */
+/*bytes*/
+static size_t c_disk_churn_block_size = 32 * 1024; 
+/*bytes*/
+static size_t c_disk_churn_step_size = 4 * 1024;
+/*ms*/
+static long c_disk_churn_sleep = 100;
 
-static int ncpus = -1; /* autodetect */
+/*Autodetect*/
+static int ncpus = -1; 
 
 /* resource vector struct
  */
@@ -1052,7 +1060,7 @@ static void usage()
     exit(0);
 }
 
-/* Read the first legit row and return the start time. -1 in case of error
+/* Read the first legit row and return the start time. If file is NULL, return actual current time. 
  */
 long int get_start_time(FILE* tf) 
 {
@@ -1062,8 +1070,10 @@ long int get_start_time(FILE* tf)
     char* line ;
     char* token ;
     long int start_time ;
+    struct timeval tv ;
     if(tf == NULL) {
-      return -1 ;
+      gettimeofday(&tv, NULL) ;
+      return (1000000*tv.tv_sec) + tv.tv_usec ;
     }
  read_first_line:
 
@@ -1366,24 +1376,22 @@ int main(int argc, char **argv)
         mem_pid = start_mem_whisker(c_mem_util); // forks
     }
     /* 3. All forked. The main process now sleeps forever. */
+
+    /* 4. Start the clock */    
     int timetick = 0 ;
-    /* 4. Start the clock */
-    if(trace_file) {
-      long int start_time = get_start_time(trace_file) ;    
-      global_trace_start_time =  start_time ;
-    }
-    //construct the resource_vector here.
-    while (sleep(1) == 0) {
+    long int start_time = get_start_time(trace_file) ;    
+    global_trace_start_time =  start_time ;
+        
+    while (trace_file && sleep(1) == 0) {
        timetick++ ;
-       //put this in the shared memory region?
        /* 5. Read next value */
        if(trace_file && update_resource_vector(new_resource_vector, timetick, trace_file)) {
 	 //End of file probably reached
 	 say(1,"End of file probably reached \n \n");
        }
        memcpy(shared_mem_region, &timetick, sizeof(int)) ;
-       say(1, "lookbusy (%d): waiting for spinners...CPU=%d \n", getpid(), c_cpu_util_l);
     }
+
     shutdown();
     return 0;
 }
